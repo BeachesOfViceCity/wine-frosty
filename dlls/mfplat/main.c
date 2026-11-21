@@ -9701,6 +9701,19 @@ HRESULT WINAPI MFCreateDXGIDeviceManager(UINT *token, IMFDXGIDeviceManager **man
 }
 
 /***********************************************************************
+ *      MFResetDXGIDeviceManagerX (mfplat.@)
+ */
+HRESULT WINAPI MFResetDXGIDeviceManagerX(IMFDXGIDeviceManager *manager, IUnknown *device, UINT token)
+{
+    TRACE("%p, %p, %u.\n", manager, device, token);
+
+    if (!manager)
+        return E_POINTER;
+
+    return IMFDXGIDeviceManager_ResetDevice(manager, device, token);
+}
+
+/***********************************************************************
  *      MFLockDXGIDeviceManager (mfplat.@)
  */
 HRESULT WINAPI MFLockDXGIDeviceManager(UINT *token, IMFDXGIDeviceManager **manager)

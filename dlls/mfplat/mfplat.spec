@@ -148,6 +148,7 @@
 @ stdcall MFRegisterLocalSchemeHandler(wstr ptr)
 @ stdcall MFRegisterPlatformWithMMCSS(wstr ptr long) rtworkq.RtwqRegisterPlatformWithMMCSS
 @ stdcall MFRemovePeriodicCallback(long) rtworkq.RtwqRemovePeriodicCallback
+@ stdcall MFResetDXGIDeviceManagerX(ptr ptr long)
 @ stdcall MFScheduleWorkItem(ptr ptr int64 ptr)
 @ stdcall MFScheduleWorkItemEx(ptr int64 ptr) rtworkq.RtwqScheduleWorkItem
 @ stdcall MFSerializeAttributesToStream(ptr long ptr)
