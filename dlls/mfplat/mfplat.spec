@@ -48,6 +48,7 @@
 @ stdcall MFCreateD3D12SynchronizationObject(ptr ptr ptr)
 @ stdcall MFCreateDXGIDeviceManager(ptr ptr)
 @ stdcall MFCreateDXGISurfaceBuffer(ptr ptr long long ptr)
+@ stdcall MFCreateDXGISurfaceBufferX(ptr ptr long long ptr)
 @ stdcall MFCreateDXSurfaceBuffer(ptr ptr long ptr)
 @ stdcall MFCreateEventQueue(ptr)
 @ stdcall MFCreateFile(long long long wstr ptr)

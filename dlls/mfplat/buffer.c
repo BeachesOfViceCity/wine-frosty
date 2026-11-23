@@ -2275,6 +2275,16 @@ HRESULT WINAPI MFCreateDXGISurfaceBuffer(REFIID riid, IUnknown *surface, UINT su
         return E_INVALIDARG;
 }
 
+/* The Xbox entry point ignores the scanline-orientation argument for D3D12
+ * resources. Its other surface types use the ordinary five-argument ABI. */
+HRESULT WINAPI MFCreateDXGISurfaceBufferX(REFIID riid, IUnknown *surface, UINT subresource, BOOL bottom_up,
+        IMFMediaBuffer **buffer)
+{
+    if (!riid || !surface || !buffer) return E_POINTER;
+    return MFCreateDXGISurfaceBuffer(riid, surface, subresource,
+            IsEqualIID(riid, &IID_ID3D12Resource) ? FALSE : bottom_up, buffer);
+}
+
 static unsigned int buffer_get_aligned_length(unsigned int length, unsigned int alignment)
 {
     length = (length + alignment) / alignment;

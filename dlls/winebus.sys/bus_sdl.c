@@ -1170,6 +1170,27 @@ NTSTATUS sdl_bus_init(void *args)
     /* Process mappings */
     if (pSDL_GameControllerAddMapping)
     {
+#ifdef __linux__
+        /* Linux hid-playstation marks its standardized evdev layout with
+         * bit 15 of the input version. SDL2 has the legacy Bluetooth Edge
+         * mapping, which puts Cross on Square and treats L2 as right X
+         * when it falls back by VID/PID. Supply the versioned evdev GUIDs
+         * before user mappings; HIDAPI's driver-tagged GUID is distinct. */
+        static const char *const edge_guids[] =
+        {
+            "030000004c050000f20d000011810000", "050000004c050000f20d000000810000",
+            "030000004c050000f20d000000810000", "050000004c050000f20d000011810000",
+        };
+        for (i = 0; i < ARRAY_SIZE(edge_guids); ++i)
+        {
+            char line[512];
+            snprintf(line, sizeof(line), "%s,DualSense Edge Wireless Controller,a:b0,b:b1,x:b3,y:b2,"
+                     "back:b8,start:b9,guide:b10,leftshoulder:b4,rightshoulder:b5,leftstick:b11,rightstick:b12,"
+                     "dpup:h0.1,dpright:h0.2,dpdown:h0.4,dpleft:h0.8,leftx:a0,lefty:a1,lefttrigger:a2,"
+                     "rightx:a3,righty:a4,righttrigger:a5,", edge_guids[i]);
+            pSDL_GameControllerAddMapping(line);
+        }
+#endif
         if ((mapping = getenv("SDL_GAMECONTROLLERCONFIG")))
         {
             TRACE("Setting environment mapping %s\n", debugstr_a(mapping));

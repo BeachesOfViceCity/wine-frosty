@@ -3340,6 +3340,7 @@ BOOL WINAPI WinHttpReceiveResponse( HINTERNET hrequest, LPVOID reserved )
 {
     DWORD ret;
     struct request *request;
+    WCHAR defer[2];
 
     TRACE("%p, %p\n", hrequest, reserved);
 
@@ -3355,7 +3356,26 @@ BOOL WINAPI WinHttpReceiveResponse( HINTERNET hrequest, LPVOID reserved )
         return FALSE;
     }
 
-    ret = receive_response( request );
+    /* The title pumps messages under the same connection lock as its HTTP
+     * worker. In an asynchronous session, don't keep that caller inside
+     * read_reply() until the remote headers arrive. Use the request's
+     * existing FIFO (including its handle retention and status callbacks).
+     * Other applications keep the usual inline notification behavior. */
+    if ((request->connect->hdr.flags & WINHTTP_FLAG_ASYNC) &&
+        GetEnvironmentVariableW( L"FROSTY_ASYNC_HTTP_HEADERS", defer, ARRAY_SIZE(defer) ) == 1 && defer[0] == '1')
+    {
+        LONG state = InterlockedCompareExchange( (LONG *)&request->state, REQUEST_STATE_READ_RESPONSE_QUEUED,
+                                                 REQUEST_STATE_REQUEST_SENT );
+        if (state == REQUEST_STATE_REQUEST_SENT)
+        {
+            if ((ret = queue_receive_response( request )))
+                InterlockedCompareExchange( (LONG *)&request->state, REQUEST_STATE_REQUEST_SENT,
+                                            REQUEST_STATE_READ_RESPONSE_QUEUED );
+        }
+        else if (state == REQUEST_STATE_READ_RESPONSE_QUEUED) ret = ERROR_WINHTTP_INCORRECT_HANDLE_STATE;
+        else ret = receive_response( request );
+    }
+    else ret = receive_response( request );
 
     release_object( &request->hdr );
     SetLastError( ret );

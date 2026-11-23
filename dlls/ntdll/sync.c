@@ -511,35 +511,26 @@ void WINAPI RtlInitializeSRWLock( RTL_SRWLOCK *lock )
 void WINAPI RtlAcquireSRWLockExclusive( RTL_SRWLOCK *lock )
 {
     union { RTL_SRWLOCK *rtl; struct srw_lock *s; LONG *l; } u = { lock };
+    union { struct srw_lock s; LONG l; } owned = { .s = { .exclusive_waiters = 1, .owners = 1 } };
 
+    if (!ReadNoFence( u.l ) && !InterlockedCompareExchange( u.l, owned.l, 0 )) return;
     InterlockedExchangeAdd16( &u.s->exclusive_waiters, 2 );
 
     for (;;)
     {
         union { struct srw_lock s; LONG l; } old, new;
-        BOOL wait;
-
-        do
+        old.l = ReadAcquire( u.l );
+        if (old.s.owners)
         {
-            old.s = *u.s;
-            new.s = old.s;
-
-            if (!old.s.owners)
-            {
-                /* Not locked exclusive or shared. We can try to grab it. */
-                new.s.owners = 1;
-                new.s.exclusive_waiters -= 2;
-                new.s.exclusive_waiters |= 1;
-                wait = FALSE;
-            }
-            else
-            {
-                wait = TRUE;
-            }
-        } while (InterlockedCompareExchange( u.l, new.l, old.l ) != old.l);
-
-        if (!wait) return;
-        RtlWaitOnAddress( &u.s->owners, &new.s.owners, sizeof(short), NULL );
+            /* WaitOnAddress itself rechecks the value before parking. */
+            RtlWaitOnAddress( &u.s->owners, &old.s.owners, sizeof(short), NULL );
+            continue;
+        }
+        new = old;
+        new.s.owners = 1;
+        new.s.exclusive_waiters -= 2;
+        new.s.exclusive_waiters |= 1;
+        if (InterlockedCompareExchange( u.l, new.l, old.l ) == old.l) return;
     }
 }
 
@@ -557,28 +548,15 @@ void WINAPI RtlAcquireSRWLockShared( RTL_SRWLOCK *lock )
     for (;;)
     {
         union { struct srw_lock s; LONG l; } old, new;
-        BOOL wait;
-
-        do
+        old.l = ReadAcquire( u.l );
+        if (old.s.exclusive_waiters)
         {
-            old.s = *u.s;
-            new = old;
-
-            if (!old.s.exclusive_waiters)
-            {
-                /* Not locked exclusive, and no exclusive waiters.
-                 * We can try to grab it. */
-                ++new.s.owners;
-                wait = FALSE;
-            }
-            else
-            {
-                wait = TRUE;
-            }
-        } while (InterlockedCompareExchange( u.l, new.l, old.l ) != old.l);
-
-        if (!wait) return;
-        RtlWaitOnAddress( u.s, &new.s, sizeof(struct srw_lock), NULL );
+            RtlWaitOnAddress( u.s, &old.s, sizeof(struct srw_lock), NULL );
+            continue;
+        }
+        new = old;
+        ++new.s.owners;
+        if (InterlockedCompareExchange( u.l, new.l, old.l ) == old.l) return;
     }
 }
 
@@ -626,7 +604,7 @@ void WINAPI RtlReleaseSRWLockShared( RTL_SRWLOCK *lock )
         --new.s.owners;
     } while (InterlockedCompareExchange( u.l, new.l, old.l ) != old.l);
 
-    if (!new.s.owners)
+    if (!new.s.owners && new.s.exclusive_waiters)
         RtlWakeAddressSingle( &u.s->owners );
 }
 
@@ -826,30 +804,33 @@ struct futex_entry
     DWORD tid;
 };
 
-struct futex_queue
+struct DECLSPEC_ALIGN(64) futex_queue
 {
     struct list queue;
     LONG lock;
 };
 
-static struct futex_queue futex_queues[256];
+static struct futex_queue futex_queues[1024];
 
 static struct futex_queue *get_futex_queue( const void *addr )
 {
-    ULONG_PTR val = (ULONG_PTR)addr;
+    ULONG_PTR val = (ULONG_PTR)addr >> 3;
 
-    return &futex_queues[(val >> 4) % ARRAY_SIZE(futex_queues)];
+    /* Fixed-offset locks in different page-aligned objects are unrelated. */
+    val ^= val >> 10;
+    val ^= val >> 20;
+    return &futex_queues[val % ARRAY_SIZE(futex_queues)];
 }
 
 static void spin_lock( LONG *lock )
 {
     while (InterlockedCompareExchange( lock, -1, 0 ))
-        YieldProcessor();
+        while (ReadNoFence( lock )) YieldProcessor();
 }
 
 static void spin_unlock( LONG *lock )
 {
-    InterlockedExchange( lock, 0 );
+    WriteRelease( lock, 0 );
 }
 
 static BOOL compare_addr( const void *addr, const void *cmp, SIZE_T size )

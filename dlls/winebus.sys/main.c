@@ -52,6 +52,7 @@ static DEVICE_OBJECT *bus_pdo;
 static DEVICE_OBJECT *bus_fdo;
 
 static struct bus_options options = {.devices = LIST_INIT(options.devices)};
+static BOOL mapped_gamepads;
 static HANDLE driver_key;
 
 typedef struct
@@ -533,7 +534,11 @@ static BOOL is_hidraw_enabled(WORD vid, WORD pid, const USAGE_AND_PAGE *usages, 
 
     if (options.disable_sdl && options.disable_input) prefer_hidraw = TRUE;
     if (is_dualshock4_gamepad(vid, pid)) prefer_hidraw = TRUE;
-    if (is_dualsense_gamepad(vid, pid)) prefer_hidraw = TRUE;
+    /* Xbox consumers need the SDL gamepad collection: the native Sony
+     * collection is not an XInput device and has different button/axis
+     * usages. Choose one representation for both USB and Bluetooth. Keep
+     * raw HID when mapping is unavailable or explicitly requested. */
+    if (is_dualsense_gamepad(vid, pid)) prefer_hidraw = !mapped_gamepads;
 
     switch (vid)
     {
@@ -1333,7 +1338,9 @@ static NTSTATUS fdo_pnp_dispatch(DEVICE_OBJECT *device, IRP *irp)
         mouse_device_create();
         keyboard_device_create();
 
+        mapped_gamepads = !options.disable_sdl && options.map_controllers;
         if (!sdl_driver_init()) options.disable_input = TRUE;
+        else mapped_gamepads = FALSE;
         udev_driver_init();
         iohid_driver_init();
 
