@@ -957,7 +957,15 @@ static const WCHAR guid_key_prefixW[] =
 };
 static const WCHAR guid_key_suffixW[] = {'}','\\','0','0','0','0'};
 
-static BOOL load_desktop_driver( HWND hwnd )
+static BOOL shell_free_desktop(void)
+{
+    USEROBJECTFLAGS flags;
+    return NtUserGetObjectInformation( NtUserGetThreadDesktop( GetCurrentThreadId() ),
+                                       UOI_FLAGS, &flags, sizeof(flags), NULL ) &&
+           (flags.dwFlags & DF_WINE_SHELL_FREE_DESKTOP);
+}
+
+static BOOL load_desktop_driver(void)
 {
     static const WCHAR guid_nullW[] = {'0','0','0','0','0','0','0','0','-','0','0','0','0','-','0','0','0','0','-',
                                        '0','0','0','0','-','0','0','0','0','0','0','0','0','0','0','0','0',0};
@@ -969,6 +977,7 @@ static BOOL load_desktop_driver( HWND hwnd )
     HKEY hkey;
     DWORD size;
     UINT guid_atom;
+    HWND hwnd;
 
     static const WCHAR prop_nameW[] =
         {'_','_','w','i','n','e','_','d','i','s','p','l','a','y','_','d','e','v','i','c','e',
@@ -976,6 +985,20 @@ static BOOL load_desktop_driver( HWND hwnd )
 
     user_check_not_lock();
 
+    if (shell_free_desktop())
+    {
+        /* A server-owned desktop has no explorer to publish a driver GUID.
+         * Try the native Linux display drivers in the normal order. */
+        static const WCHAR x11W[] = {'w','i','n','e','x','1','1','.','d','r','v',0};
+        static const WCHAR waylandW[] = {'w','i','n','e','w','a','y','l','a','n','d','.','d','r','v',0};
+        void *ret_ptr;
+        ULONG ret_len;
+        if (!KeUserModeCallback( NtUserLoadDriver, x11W, sizeof(x11W), &ret_ptr, &ret_len ) ||
+            !KeUserModeCallback( NtUserLoadDriver, waylandW, sizeof(waylandW), &ret_ptr, &ret_len )) return TRUE;
+        asciiz_to_unicode( driver_load_error, "Unable to load the X11 or Wayland display driver." );
+        return FALSE;
+    }
+    hwnd = get_desktop_window();
     asciiz_to_unicode( driver_load_error, "The explorer process failed to start." );  /* default error */
     /* wait for graphics driver to be ready */
     send_message( hwnd, WM_NULL, 0, 0 );
@@ -1037,7 +1060,7 @@ static void load_display_driver(void)
     USEROBJECTFLAGS flags;
     HWINSTA winstation;
 
-    if (is_service_process() || !load_desktop_driver( get_desktop_window() ) || user_driver == &lazy_load_driver)
+    if (is_service_process() || !load_desktop_driver() || user_driver == &lazy_load_driver)
     {
         winstation = NtUserGetProcessWindowStation();
         if (!NtUserGetObjectInformation( winstation, UOI_FLAGS, &flags, sizeof(flags), NULL )
@@ -1259,11 +1282,23 @@ static LRESULT loaderdrv_WintabProc( HWND hwnd, UINT msg, WPARAM wparam, LPARAM 
 
 static UINT loaderdrv_VulkanInit( UINT version, void *vulkan_handle, const struct vulkan_driver_funcs **driver_funcs )
 {
+    /* Display enumeration itself creates a Vulkan instance. Do not enter
+     * update_display_cache from the Vulkan loader's pthread_once. */
+    if (shell_free_desktop())
+    {
+        init_display_driver();
+        return user_driver->pVulkanInit( version, vulkan_handle, driver_funcs );
+    }
     return load_driver()->pVulkanInit( version, vulkan_handle, driver_funcs );
 }
 
 static UINT loaderdrv_OpenGLInit( UINT version, const struct opengl_funcs *opengl_funcs, const struct opengl_driver_funcs **driver_funcs )
 {
+    if (shell_free_desktop())
+    {
+        init_display_driver();
+        return user_driver->pOpenGLInit( version, opengl_funcs, driver_funcs );
+    }
     return load_driver()->pOpenGLInit( version, opengl_funcs, driver_funcs );
 }
 

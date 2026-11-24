@@ -22,6 +22,7 @@
 
 #include <stdio.h>
 #include <stdarg.h>
+#include <stdlib.h>
 #include <sys/types.h>
 
 #include "ntstatus.h"
@@ -256,6 +257,9 @@ static bool desktop_init( struct object *obj, const void *init_data )
     const struct desktop_init_data *data = init_data;
     unsigned int flags = data->flags;
     struct desktop *current_desktop;
+    const char *shell_free = getenv( "FROSTY_NO_EXPLORER" );
+
+    if (shell_free && !strcmp( shell_free, "1" )) flags |= DF_WINE_SHELL_FREE_DESKTOP;
 
     /* inherit DF_WINE_*_DESKTOP flags if none of them are specified */
     if (!(flags & (DF_WINE_ROOT_DESKTOP | DF_WINE_VIRTUAL_DESKTOP)) &&
@@ -882,7 +886,7 @@ DECL_HANDLER(set_user_object_info)
         {
             SHARED_WRITE_BEGIN( desktop->shared, desktop_shm_t )
             {
-                shared->flags = req->obj_flags;
+                shared->flags = req->obj_flags | (shared->flags & DF_WINE_SHELL_FREE_DESKTOP);
             }
             SHARED_WRITE_END;
         }

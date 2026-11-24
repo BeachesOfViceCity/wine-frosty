@@ -678,7 +678,7 @@ void post_desktop_message( struct desktop *desktop, unsigned int message,
 /* create a new window structure (note: the window is not linked in the window tree) */
 static struct window *create_window( struct window *parent, struct window *owner, atom_t atom,
                                      mod_handle_t class_instance, bool ansi, unsigned int dpi_context,
-                                     unsigned int dpi, struct ratio scale )
+                                     unsigned int dpi, struct ratio scale, struct thread *client )
 {
     data_size_t extra_size, private_size;
     struct window *win = NULL;
@@ -758,7 +758,7 @@ static struct window *create_window( struct window *parent, struct window *owner
     }
     SHARED_WRITE_END;
 
-    if (!(win->handle = alloc_user_handle( win, win->shared, NTUSER_OBJ_WINDOW ))) goto failed;
+    if (!(win->handle = alloc_user_handle( win, win->shared, NTUSER_OBJ_WINDOW, client ))) goto failed;
     win->last_active = win->handle;
 
     /* make sure that the thread has a message queue */
@@ -2312,7 +2312,7 @@ DECL_HANDLER(create_window)
     if (!atom) atom = find_atom( table, cls_name );
 
     if (!(win = create_window( parent, owner, atom, req->class_instance, !!req->ansi,
-                               req->dpi_context, req->dpi, req->scale )))
+                               req->dpi_context, req->dpi, req->scale, current )))
         return;
 
     SHARED_WRITE_BEGIN( win->shared, window_shm_t )
@@ -2408,15 +2408,21 @@ DECL_HANDLER(get_desktop_window)
     static const struct monitor_info default_info = { .dpi = USER_DEFAULT_SCREEN_DPI, .scale = { USER_DEFAULT_SCREEN_DPI, 1 } };
     static const struct rectangle desktop_rect = { 0, 0, 1, 1 };
     const struct monitor_info *info = NULL;
+    int force = req->force;
 
     struct desktop *desktop = get_thread_desktop( current, 0 );
 
     if (!desktop) return;
 
-    if (!desktop->top_window && req->force)  /* create it */
+    /* Frosty starts its title directly. Create the shared desktop and message
+     * windows here, even when the first client is a helper without the title
+     * environment. Otherwise win32u starts explorer.exe /desktop. */
+    if (desktop->shared->flags & DF_WINE_SHELL_FREE_DESKTOP) force = 1;
+
+    if (!desktop->top_window && force)  /* create it */
     {
         if (!(info = get_monitor_from_rect( desktop->winstation, &desktop_rect, false ))) info = &default_info;
-        if ((desktop->top_window = create_window( NULL, NULL, DESKTOP_ATOM, 0, false, NTUSER_DPI_PER_MONITOR_AWARE, info->dpi, info->scale )))
+        if ((desktop->top_window = create_window( NULL, NULL, DESKTOP_ATOM, 0, false, NTUSER_DPI_PER_MONITOR_AWARE, info->dpi, info->scale, NULL )))
         {
             detach_window_thread( desktop->top_window );
             SHARED_WRITE_BEGIN( desktop->top_window->shared, window_shm_t )
@@ -2427,7 +2433,7 @@ DECL_HANDLER(get_desktop_window)
         }
     }
 
-    if (!desktop->msg_window && req->force)  /* create it */
+    if (!desktop->msg_window && force)  /* create it */
     {
         static const WCHAR messageW[] = {'M','e','s','s','a','g','e'};
         static const struct unicode_str name = { messageW, sizeof(messageW) };
@@ -2435,7 +2441,7 @@ DECL_HANDLER(get_desktop_window)
         atom_t atom = add_atom( table, name );
 
         if (!info && !(info = get_monitor_from_rect( desktop->winstation, &desktop_rect, false ))) info = &default_info;
-        if (atom && (desktop->msg_window = create_window( NULL, NULL, atom, 0, false, NTUSER_DPI_PER_MONITOR_AWARE, info->dpi, info->scale )))
+        if (atom && (desktop->msg_window = create_window( NULL, NULL, atom, 0, false, NTUSER_DPI_PER_MONITOR_AWARE, info->dpi, info->scale, NULL )))
         {
             detach_window_thread( desktop->msg_window );
             SHARED_WRITE_BEGIN( desktop->msg_window->shared, window_shm_t )

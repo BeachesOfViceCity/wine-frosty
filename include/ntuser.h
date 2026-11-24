@@ -391,6 +391,7 @@ C_ASSERT( sizeof(struct drag_drop_post_params) == offsetof(struct drag_drop_post
 #define SPY_RESULT_DEFWND  0x0002
 
 /* CreateDesktop wine specific flag */
+#define DF_WINE_SHELL_FREE_DESKTOP 0x20000000
 #define DF_WINE_ROOT_DESKTOP      0x40000000
 #define DF_WINE_VIRTUAL_DESKTOP   0x80000000
 
